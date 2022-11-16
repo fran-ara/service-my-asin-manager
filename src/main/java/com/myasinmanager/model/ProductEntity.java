@@ -35,8 +35,8 @@ import lombok.ToString;
 @NoArgsConstructor
 @JsonInclude(Include.NON_NULL)
 @ToString
-@Entity
 @Table(name = "products", schema = "public")
+@Entity(name="products")
 public class ProductEntity {
 
 	@Id

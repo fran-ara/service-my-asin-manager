@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.myasinmanager.model.ProductEntity;
@@ -25,8 +26,8 @@ public class ServerSentEventController {
 
 	@GetMapping(path = "/sse/product-prices")
 	@CrossOrigin({ "*" })
-	public Flux<ServerSentEvent<List<ProductEntity>>> streamProducts(Pageable pageable) {
-		return eventService.getProducts(pageable);
+	public Flux<ServerSentEvent<List<ProductEntity>>> streamProducts(@RequestParam Integer[] tags, Pageable pageable) {
+		return eventService.getProducts(pageable, tags);
 	}
 
 	@GetMapping(path = "/sse/product-prices/update")

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.myasinmanager.model.ProductEntity;
@@ -25,10 +26,10 @@ public class ProductController {
 	private ProductService productInfoService;
 
 	@GetMapping
-	public ResponseEntity<Page<ProductEntity>> getAll(Pageable pageable) {
-		log.debug("Getting all products with pagination [page = {}, size= {}]", pageable.getPageNumber(),
-				pageable.getPageSize());
-		return ResponseEntity.ok(productInfoService.findAll(pageable));
+	public ResponseEntity<Page<ProductEntity>> getAll(@RequestParam("tags") Integer[] tags, Pageable pageable) {
+		log.debug("Getting all products with pagination [page = {}, size= {}, tags = {}]", pageable.getPageNumber(),
+				pageable.getPageSize(),tags);
+		return ResponseEntity.ok(productInfoService.findAll(pageable, tags));
 	}
 
 	@PostMapping("/load-data")

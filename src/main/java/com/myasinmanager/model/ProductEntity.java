@@ -2,18 +2,27 @@ package com.myasinmanager.model;
 
 import java.math.BigDecimal;
 import java.util.Date;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
+import javax.persistence.CascadeType;
 import javax.persistence.Column;
 import javax.persistence.Entity;
+import javax.persistence.FetchType;
 import javax.persistence.GeneratedValue;
 import javax.persistence.GenerationType;
 import javax.persistence.Id;
+import javax.persistence.JoinColumn;
+import javax.persistence.JoinTable;
+import javax.persistence.ManyToMany;
 import javax.persistence.Table;
 import javax.persistence.Transient;
 
 import org.hibernate.annotations.GenericGenerator;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -30,13 +39,13 @@ import lombok.ToString;
 @Builder
 @Setter
 @Getter
-@EqualsAndHashCode
+@EqualsAndHashCode(exclude = "tags")
 @AllArgsConstructor
 @NoArgsConstructor
 @JsonInclude(Include.NON_NULL)
-@ToString
+@ToString(exclude = "tags")
 @Table(name = "products", schema = "public")
-@Entity(name="products")
+@Entity(name = "products")
 public class ProductEntity {
 
 	@Id
@@ -87,9 +96,20 @@ public class ProductEntity {
 	@Column(name = "notes")
 	private String notes;
 
+//	@JsonIgnore
+//	@Column(name = "tags")
+//	private String tags;
+
+	@JsonIgnoreProperties("products")
 	@JsonIgnore
-	@Column(name = "tags")
-	private String tags;
+	@ManyToMany(cascade = CascadeType.ALL,fetch = FetchType.LAZY)
+	@JoinTable(name = "products_tags", joinColumns = @JoinColumn(name = "product_id"), inverseJoinColumns = @JoinColumn(name = "tag_id"))
+	private Set<TagEntity> tags;
+	
+	@JsonIgnore
+	@Transient
+	private List<Integer> tagsId;
+
 
 	@Column(name = "fba_seller_count")
 	private Integer fbaSellerCount;
@@ -103,8 +123,15 @@ public class ProductEntity {
 	private Details details;
 
 	public Details getDetails() {
-		this.setDetails(new Details(this.getNotes(), this.getTags(), this.getDate()));
+		this.setDetails(new Details(this.getNotes(), 
+				this.getTags().stream().map(t -> t.getName()).collect(Collectors.toList()), this.getDate()));
 		return details;
+
+	}
+	
+	public List<Integer>  getTagsId() {
+		this.setTagsId(this.getTags().stream().map(t -> t.getId().intValue()).collect(Collectors.toList()));
+		return tagsId;
 
 	}
 
@@ -119,7 +146,7 @@ public class ProductEntity {
 		@JsonProperty("notes")
 		private String notes;
 		@JsonProperty("tags")
-		private String tags;
+		private List<String> tags;
 		@JsonProperty("date")
 		private Date date;
 

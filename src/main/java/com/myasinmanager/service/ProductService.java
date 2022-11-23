@@ -15,9 +15,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
 import com.myasinmanager.model.ProductEntity;
 import com.myasinmanager.model.TagEntity;
 import com.myasinmanager.repository.ProductRepository;
+import com.myasinmanager.repository.TagRepository;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -28,6 +30,12 @@ public class ProductService {
 
 	@Autowired
 	private ProductRepository productRepository;
+
+	@Autowired
+	private TagRepository tagRepository;
+	
+
+
 
 	public Page<ProductEntity> findAll(Pageable pageable, Integer[] tags) {
 		Page<ProductEntity> productsPaginated = productRepository.findAll(pageable);
@@ -48,6 +56,41 @@ public class ProductService {
 		ProductEntity productSaved = productRepository.save(product);
 		log.debug("Product with asin {} saved", product.getAsin());
 		return productSaved;
+	}
+
+	public void setTagsToProduct(Integer productId, List<Integer> tagsIds) {
+		log.debug("Adding tags ");
+		ProductEntity product = productRepository.findById(productId.longValue())
+				.orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
+
+		Set<TagEntity> tags = tagsIds.stream().filter(Objects::nonNull)
+				.map(t -> tagRepository.findById(t.longValue()).get()).collect(Collectors.toSet());
+
+		product.setTags(tags);
+		productRepository.save(product);
+		log.debug("Tags were added to the product");
+	}
+	
+	public void addNewTagToProduct(Integer productId, TagEntity  tag) {
+		log.debug("Adding tags ");
+		ProductEntity product = productRepository.findById(productId.longValue())
+				.orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
+
+		product.getTags().add(tag);
+		productRepository.save(product);
+		log.debug("Tags were added to the product");
+	}
+
+	
+	public void setNotesToProduct(Integer productId, String notes) {
+		log.debug("Adding notes {}", notes);
+		ProductEntity product = productRepository.findById(productId.longValue())
+				.orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
+
+		product.setNotes(notes);
+
+		productRepository.save(product);
+		log.debug("Notes were added to the product");
 	}
 
 	public void insertData() {

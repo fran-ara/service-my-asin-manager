@@ -8,7 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.myasinmanager.model.ProductEntity;
 
 @Transactional
-public interface ProductRepository extends PagingAndSortingRepository<ProductEntity, String> {
+public interface ProductRepository extends PagingAndSortingRepository<ProductEntity, Long> {
 
 	Page<ProductEntity> findAll(Pageable pageable);
 

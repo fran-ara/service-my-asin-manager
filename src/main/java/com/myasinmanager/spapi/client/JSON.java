@@ -25,6 +25,7 @@ import org.threeten.bp.LocalDate;
 import org.threeten.bp.OffsetDateTime;
 import org.threeten.bp.format.DateTimeFormatter;
 
+import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
@@ -49,6 +50,7 @@ public class JSON {
 	public static GsonBuilder createGson() {
 		GsonFireBuilder fireBuilder = new GsonFireBuilder();
 		GsonBuilder builder = fireBuilder.createGsonBuilder();
+		builder.setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES);
 		return builder;
 	}
 
@@ -69,7 +71,8 @@ public class JSON {
 	}
 
 	public JSON() {
-		gson = createGson().registerTypeAdapter(Date.class, dateTypeAdapter)
+		gson = createGson().setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+				.registerTypeAdapter(Date.class, dateTypeAdapter)
 				.registerTypeAdapter(java.sql.Date.class, sqlDateTypeAdapter)
 				.registerTypeAdapter(OffsetDateTime.class, offsetDateTimeTypeAdapter)
 				.registerTypeAdapter(LocalDate.class, localDateTypeAdapter)
@@ -82,7 +85,7 @@ public class JSON {
 	 * @return Gson
 	 */
 	public Gson getGson() {
-		return gson;
+		return new GsonBuilder().setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES).create();
 	}
 
 	/**

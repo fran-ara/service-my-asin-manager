@@ -25,5 +25,10 @@ public class TagService {
 		return tags;
 	}
 
+	public TagEntity create(String name) {
+		log.debug("Creating new tag with name :{}", name);
+		TagEntity tag = TagEntity.builder().name(name).build();
+		return tagRepository.save(tag);
+	}
 
 }

@@ -1,8 +1,10 @@
 package com.myasinmanager.model;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -68,6 +70,9 @@ public class ProductEntity {
 	@Column(name = "supplier_link")
 	private String supplierLink;
 
+	@Column(name = "supplier")
+	private String supplier;
+
 	@Column(name = "current_bb_price")
 	private BigDecimal currentBBPrice;
 
@@ -102,14 +107,13 @@ public class ProductEntity {
 
 	@JsonIgnoreProperties("products")
 	@JsonIgnore
-	@ManyToMany(cascade = CascadeType.ALL,fetch = FetchType.LAZY)
+	@ManyToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
 	@JoinTable(name = "products_tags", joinColumns = @JoinColumn(name = "product_id"), inverseJoinColumns = @JoinColumn(name = "tag_id"))
 	private Set<TagEntity> tags;
-	
+
 	@JsonIgnore
 	@Transient
 	private List<Integer> tagsId;
-
 
 	@Column(name = "fba_seller_count")
 	private Integer fbaSellerCount;
@@ -123,14 +127,15 @@ public class ProductEntity {
 	private Details details;
 
 	public Details getDetails() {
-		this.setDetails(new Details(this.getNotes(), 
-				this.getTags().stream().map(t -> t.getName()).collect(Collectors.toList()), this.getDate()));
+		this.setDetails(new Details(this.getNotes(), this.getTags(), this.getDate()));
 		return details;
 
 	}
-	
-	public List<Integer>  getTagsId() {
-		this.setTagsId(this.getTags().stream().map(t -> t.getId().intValue()).collect(Collectors.toList()));
+
+	public List<Integer> getTagsId() {
+		this.setTagsId(Objects.nonNull(this.getTags())
+				? this.getTags().stream().map(t -> t.getId().intValue()).collect(Collectors.toList())
+				: new ArrayList<>());
 		return tagsId;
 
 	}
@@ -146,7 +151,7 @@ public class ProductEntity {
 		@JsonProperty("notes")
 		private String notes;
 		@JsonProperty("tags")
-		private List<String> tags;
+		private Set<TagEntity> tags;
 		@JsonProperty("date")
 		private Date date;
 

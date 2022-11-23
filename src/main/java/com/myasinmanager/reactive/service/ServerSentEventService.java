@@ -22,7 +22,7 @@ public class ServerSentEventService {
 
 	@CrossOrigin(allowCredentials = "true")
 	public Flux<ServerSentEvent<List<ProductEntity>>> getProducts(Pageable pageable, Integer[] tags) {
-		return Flux.interval(Duration.ofSeconds(3))
+		return Flux.interval(Duration.ofSeconds(40))
 				.map(sequence -> ServerSentEvent.<List<ProductEntity>>builder().id(String.valueOf(sequence))
 						.event("products-event").data(productService.findAll(pageable, tags).getContent()).build());
 

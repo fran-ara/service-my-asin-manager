@@ -74,9 +74,11 @@ import com.squareup.okhttp.internal.http.HttpMethod;
 import com.squareup.okhttp.logging.HttpLoggingInterceptor;
 import com.squareup.okhttp.logging.HttpLoggingInterceptor.Level;
 
+import lombok.extern.slf4j.Slf4j;
 import okio.BufferedSink;
 import okio.Okio;
 
+@Slf4j
 public class ApiClient {
 
 	private String basePath = "https://sellingpartnerapi-na.amazon.com";
@@ -740,6 +742,8 @@ public class ApiClient {
 	 */
 	@SuppressWarnings("unchecked")
 	public <T> T deserialize(Response response, Type returnType) throws ApiException {
+		log.debug("------------------------------Response  {} ",response.body().toString());
+
 		if (response == null || returnType == null) {
 			return null;
 		}
@@ -771,6 +775,7 @@ public class ApiClient {
 		}
 
 		String contentType = response.headers().get("Content-Type");
+
 		if (contentType == null) {
 			// ensuring a default content type
 			contentType = "application/json";
@@ -966,6 +971,35 @@ public class ApiClient {
 	 * @return Type
 	 */
 	public <T> T handleResponse(Response response, Type returnType) throws ApiException {
+		if (response.isSuccessful()) {
+			if (returnType == null || response.code() == 204) {
+				// returning null if the returnType is not defined,
+				// or the status code is 204 (No Content)
+				if (response.body() != null) {
+					try {
+						response.body().close();
+					} catch (IOException e) {
+						throw new ApiException(response.message(), e, response.code(), response.headers().toMultimap());
+					}
+				}
+				return null;
+			} else {
+				return deserialize(response, returnType);
+			}
+		} else {
+			String respBody = null;
+			if (response.body() != null) {
+				try {
+					respBody = response.body().string();
+				} catch (IOException e) {
+					throw new ApiException(response.message(), e, response.code(), response.headers().toMultimap());
+				}
+			}
+			throw new ApiException(response.message(), response.code(), response.headers().toMultimap(), respBody);
+		}
+	}
+	
+	public <T> T handleResponsEnhanced(Response response, Type returnType) throws ApiException {
 		if (response.isSuccessful()) {
 			if (returnType == null || response.code() == 204) {
 				// returning null if the returnType is not defined,

@@ -1,42 +1,28 @@
 package com.myasinmanager.model;
 
-import java.math.BigDecimal;
-import java.util.Date;
-
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
-import javax.persistence.Table;
-import javax.persistence.Transient;
-
-import org.hibernate.annotations.GenericGenerator;
-
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.*;
+import org.hibernate.annotations.GenericGenerator;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import lombok.ToString;
+import javax.persistence.*;
+import java.math.BigDecimal;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Builder
 @Setter
 @Getter
-@EqualsAndHashCode
+@EqualsAndHashCode(exclude = "tags")
 @AllArgsConstructor
 @NoArgsConstructor
 @JsonInclude(Include.NON_NULL)
-@ToString
-@Entity
+@ToString(exclude = "tags")
 @Table(name = "products", schema = "public")
+@Entity(name = "products")
 public class ProductEntity {
 
 	@Id
@@ -59,6 +45,9 @@ public class ProductEntity {
 	@Column(name = "supplier_link")
 	private String supplierLink;
 
+	@Column(name = "supplier")
+	private String supplier;
+
 	@Column(name = "current_bb_price")
 	private BigDecimal currentBBPrice;
 
@@ -71,8 +60,8 @@ public class ProductEntity {
 	@Column(name = "roi")
 	private BigDecimal roi;
 
-	@Column(name = "net_margin")
-	private BigDecimal netMargin;
+	@Column(name = "net_profit")
+	private BigDecimal netProfit;
 
 	@Column(name = "additional_cost")
 	private BigDecimal additionalCost;
@@ -83,13 +72,26 @@ public class ProductEntity {
 	@Column(name = "category")
 	private String category;
 
+	@Column(name = "user_id")
+	private Long userId;
+
 	@JsonIgnore
 	@Column(name = "notes")
 	private String notes;
 
+//	@JsonIgnore
+//	@Column(name = "tags")
+//	private String tags;
+
+	@JsonIgnoreProperties("products")
 	@JsonIgnore
-	@Column(name = "tags")
-	private String tags;
+	@ManyToMany(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+	@JoinTable(name = "products_tags", joinColumns = @JoinColumn(name = "product_id"), inverseJoinColumns = @JoinColumn(name = "tag_id"))
+	private Set<TagEntity> tags;
+
+	@JsonIgnore
+	@Transient
+	private List<Integer> tagsId;
 
 	@Column(name = "fba_seller_count")
 	private Integer fbaSellerCount;
@@ -108,6 +110,14 @@ public class ProductEntity {
 
 	}
 
+	public List<Integer> getTagsId() {
+		this.setTagsId(Objects.nonNull(this.getTags())
+				? this.getTags().stream().map(t -> t.getId().intValue()).collect(Collectors.toList())
+				: new ArrayList<>());
+		return tagsId;
+
+	}
+
 	@EqualsAndHashCode
 	@NoArgsConstructor
 	@AllArgsConstructor
@@ -119,7 +129,7 @@ public class ProductEntity {
 		@JsonProperty("notes")
 		private String notes;
 		@JsonProperty("tags")
-		private String tags;
+		private Set<TagEntity> tags;
 		@JsonProperty("date")
 		private Date date;
 

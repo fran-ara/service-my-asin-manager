@@ -1,42 +1,17 @@
 package com.myasinmanager.model;
 
-import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
-
-import javax.persistence.CascadeType;
-import javax.persistence.Column;
-import javax.persistence.Entity;
-import javax.persistence.FetchType;
-import javax.persistence.GeneratedValue;
-import javax.persistence.GenerationType;
-import javax.persistence.Id;
-import javax.persistence.JoinColumn;
-import javax.persistence.JoinTable;
-import javax.persistence.ManyToMany;
-import javax.persistence.Table;
-import javax.persistence.Transient;
-
-import org.hibernate.annotations.GenericGenerator;
-
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.*;
+import org.hibernate.annotations.GenericGenerator;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import lombok.ToString;
+import javax.persistence.*;
+import java.math.BigDecimal;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Builder
 @Setter
@@ -85,8 +60,8 @@ public class ProductEntity {
 	@Column(name = "roi")
 	private BigDecimal roi;
 
-	@Column(name = "net_margin")
-	private BigDecimal netMargin;
+	@Column(name = "net_profit")
+	private BigDecimal netProfit;
 
 	@Column(name = "additional_cost")
 	private BigDecimal additionalCost;
@@ -96,6 +71,9 @@ public class ProductEntity {
 
 	@Column(name = "category")
 	private String category;
+
+	@Column(name = "user_id")
+	private Long userId;
 
 	@JsonIgnore
 	@Column(name = "notes")

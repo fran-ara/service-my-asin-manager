@@ -1,20 +1,13 @@
 package com.myasinmanager.controller;
 
-import java.util.List;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-
 import com.myasinmanager.model.TagEntity;
 import com.myasinmanager.service.TagService;
-
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/tags")
@@ -26,9 +19,9 @@ public class TagController {
 	private TagService tagService;
 
 	@GetMapping
-	public ResponseEntity<List<TagEntity>> getAll() {
+	public ResponseEntity<List<TagEntity>> getAll(@RequestParam String username) {
 		log.debug("Getting all tags");
-		return ResponseEntity.ok(tagService.findAll());
+		return ResponseEntity.ok(tagService.findAll(username));
 	}
 
 }

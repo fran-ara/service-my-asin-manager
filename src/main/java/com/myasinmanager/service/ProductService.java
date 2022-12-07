@@ -1,13 +1,24 @@
 package com.myasinmanager.service;
 
-import java.math.BigDecimal;
-import java.util.Date;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
+import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
+import com.myasinmanager.model.ProductEntity;
+import com.myasinmanager.model.TagEntity;
+import com.myasinmanager.repository.ProductRepository;
+import com.myasinmanager.repository.TagRepository;
+import com.myasinmanager.security.model.User;
+import com.myasinmanager.security.repository.UserRepository;
+import com.myasinmanager.spapi.api.CatalogApi;
+import com.myasinmanager.spapi.api.FeesApi;
+import com.myasinmanager.spapi.api.ProductPricingApi;
+import com.myasinmanager.spapi.client.ApiException;
+import com.myasinmanager.spapi.model.catalog.Item;
+import com.myasinmanager.spapi.model.catalog.ItemSearchResults;
+import com.myasinmanager.spapi.model.product.fees.*;
+import com.myasinmanager.spapi.model.product.pricing.CompetitivePriceType;
+import com.myasinmanager.spapi.model.product.pricing.GetOffersResponse;
+import com.myasinmanager.spapi.model.product.pricing.GetPricingResponse;
+import com.myasinmanager.spapi.model.product.pricing.Price;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -15,183 +26,266 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
-import com.myasinmanager.model.ProductEntity;
-import com.myasinmanager.model.TagEntity;
-import com.myasinmanager.repository.ProductRepository;
-import com.myasinmanager.repository.TagRepository;
-
-import lombok.extern.slf4j.Slf4j;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.*;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @Slf4j
 @Transactional
 public class ProductService {
 
-	@Autowired
-	private ProductRepository productRepository;
+    private static final String MARKETPLACE_ID_US = "ATVPDKIKX0DER";
 
-	@Autowired
-	private TagRepository tagRepository;
-	
+    private static final List<String> MARKETPLACES_IDS = List.of(MARKETPLACE_ID_US);
+
+    private static final List<String> INCLUDE_DATA = List.of("attributes", "identifiers", "images", "productTypes",
+            "salesRanks", "summaries");
+
+    private static final List<String> SUPPLIERS = List.of("Walmart", "Chedraui", "Etsy", "Ebay");
+    @Autowired
+    private TagRepository tagRepository;
+    @Autowired
+    private CatalogApi catalogApi;
+
+    @Autowired
+    private ProductPricingApi productPricingApi;
+
+    @Autowired
+    private FeesApi feesApi;
+
+    @Autowired
+    private ProductRepository productRepository;
 
 
+    @Autowired
+    private UserRepository userRepository;
 
-	public Page<ProductEntity> findAll(Pageable pageable, Integer[] tags) {
-		Page<ProductEntity> productsPaginated = productRepository.findAll(pageable);
-		if (Objects.nonNull(tags) && tags.length > 0) {
-			List<Integer> tagsIds = Stream.of(tags).mapToInt(i -> i).boxed().toList();
-			List<ProductEntity> productsFitered = productsPaginated.getContent().stream()
-					.filter(p -> p.getTagsId().containsAll(tagsIds)).collect(Collectors.toList());
-			log.debug("Response  findAll:{}", productsFitered);
-			return new PageImpl<ProductEntity>(productsFitered, pageable, productsFitered.size());
+    public Page<ProductEntity> findAll(Pageable pageable, String username, Integer[] tags) {
+        Page<ProductEntity> productsPaginated = productRepository.findAll(pageable);
+        if (Objects.isNull(username) && (Objects.isNull(tags) || tags.length == 0)) {
+            return productsPaginated;
+        }
+        User user = userRepository.findByUsername(username).orElseThrow(() -> new ResourceNotFoundException("User not found with username " + username));
+        // Filter products by username
+        List<ProductEntity> productsByUsername = productsPaginated.getContent().stream()
+                .filter(product -> (Objects.nonNull(product.getUserId())) && product.getUserId().equals(user.getId()))
+                .collect(Collectors.toList());
 
-		}
-		log.debug("Response  findAll:{}", productsPaginated.getContent());
-		return productsPaginated;
-	}
 
-	public ProductEntity create(ProductEntity product) {
-		log.debug("Inserting product :{}", product);
-		ProductEntity productSaved = productRepository.save(product);
-		log.debug("Product with asin {} saved", product.getAsin());
-		return productSaved;
-	}
+        if (Objects.nonNull(tags) && tags.length > 0) {
+            List<Integer> tagsIds = Stream.of(tags).mapToInt(i -> i).boxed().collect(Collectors.toList());
+            List<ProductEntity> productsFilteredByTags = productsByUsername.stream()
+                    .filter(p -> p.getTagsId().containsAll(tagsIds)).collect(Collectors.toList());
+            log.debug("Response  findAll:{}", productsFilteredByTags);
+            return new PageImpl<ProductEntity>(productsFilteredByTags, pageable, productsFilteredByTags.size());
+        }
+        log.debug("Response  findAll:{}", productsPaginated.getContent());
+        return new PageImpl<ProductEntity>(productsByUsername, pageable, productsByUsername.size());
+    }
 
-	public void setTagsToProduct(Integer productId, List<Integer> tagsIds) {
-		log.debug("Adding tags ");
-		ProductEntity product = productRepository.findById(productId.longValue())
-				.orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
+    public ProductEntity create(ProductEntity product) {
+        log.debug("Inserting product :{}", product);
+        ProductEntity productSaved = productRepository.save(product);
+        log.debug("Product with asin {} saved", product.getAsin());
+        return productSaved;
+    }
 
-		Set<TagEntity> tags = tagsIds.stream().filter(Objects::nonNull)
-				.map(t -> tagRepository.findById(t.longValue()).get()).collect(Collectors.toSet());
+    public void setTagsToProduct(Integer productId, List<Integer> tagsIds) {
+        log.debug("Adding tags ");
+        ProductEntity product = productRepository.findById(productId.longValue())
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
 
-		product.setTags(tags);
-		productRepository.save(product);
-		log.debug("Tags were added to the product");
-	}
-	
-	public void addNewTagToProduct(Integer productId, TagEntity  tag) {
-		log.debug("Adding tags ");
-		ProductEntity product = productRepository.findById(productId.longValue())
-				.orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
+        Set<TagEntity> tags = tagsIds.stream().filter(Objects::nonNull)
+                .map(t -> tagRepository.findById(t.longValue()).get()).collect(Collectors.toSet());
 
-		product.getTags().add(tag);
-		productRepository.save(product);
-		log.debug("Tags were added to the product");
-	}
+        product.setTags(tags);
+        productRepository.save(product);
+        log.debug("Tags were added to the product");
+    }
 
-	
-	public void setNotesToProduct(Integer productId, String notes) {
-		log.debug("Adding notes {}", notes);
-		ProductEntity product = productRepository.findById(productId.longValue())
-				.orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
+    public void addNewTagToProduct(Integer productId, String username, String tagName) {
+        log.debug("Adding tags");
+        User user = userRepository.findByUsername(username).orElseThrow(() -> new ResourceNotFoundException("User not found with username " + username));
 
-		product.setNotes(notes);
+        ProductEntity product = productRepository.findById(productId.longValue())
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
 
-		productRepository.save(product);
-		log.debug("Notes were added to the product");
-	}
+        TagEntity tag = TagEntity
+                .builder()
+                .name(tagName)
+                .userId(user.getId())
+                .build();
+        tagRepository.save(tag);
 
-	public void insertData() {
-		TagEntity tagChristmas = TagEntity.builder().id(1L).build();
-		ProductEntity p1 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/3301639.jpg")
-				.title("Tarro Cerveza Berna Vidrio 270Ml Trans Cerve").buyCost(new BigDecimal(149.0))
-				.additionalCost(BigDecimal.ZERO)
-				.supplierLink("https://www.sears.com.mx/producto/873141/tarro-cerveza-berna-vidrio-270ml-trans-cerve/")
-				.asin("B0892PYYBE").category("House").tags(Set.of(tagChristmas)).notes("Expensive product")
-				.currentBSR(new BigDecimal(10)).currentBBPrice(new BigDecimal(149.0)).date(new Date())
-				.fbaSellerCount(10).roi(new BigDecimal(10.0)).netMargin(new BigDecimal(2.0)).build();
+        product.getTags().add(tag);
+        productRepository.save(product);
+        log.debug("Tags were added to the product");
+    }
 
-		ProductEntity p2 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/imgsplaza-sears/sears/?tp=p&id=832608&t=original")
-				.title("Jarra con Vidrio con Tapa de Metal Jv97230 Good & Good").buyCost(new BigDecimal(449.0))
-				.additionalCost(BigDecimal.ZERO)
-				.supplierLink(
-						"https://www.sears.com.mx/producto/751388/jarra-con-vidrio-con-tapa-de-metal-jv97230-good-good/")
-				.asin("B0872PYYBS").category("House").tags(Set.of(tagChristmas)).notes("Expensive product")
-				.currentBSR(new BigDecimal(10)).currentBBPrice(new BigDecimal(449.0)).date(new Date()).fbaSellerCount(2)
-				.roi(new BigDecimal(7.0)).netMargin(new BigDecimal(5.0)).build();
+    public void setNotesToProduct(Integer productId, String notes) {
+        log.debug("Adding notes {}", notes);
+        ProductEntity product = productRepository.findById(productId.longValue())
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
 
-		ProductEntity p3 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/3506445.jpg")
-				.title("\n" + "Tarro Metalizado de Cerámica Mickey Adulto 20").buyCost(new BigDecimal(169.0))
-				.additionalCost(BigDecimal.ZERO)
-				.supplierLink(
-						"https://www.sears.com.mx/producto/2167334/tarro-metalizado-de-ceramica-mickey-adulto-20-oz-fund-kids/")
-				.asin("B1892PYYBS").category("House").tags(Set.of(tagChristmas)).notes("Expensive product")
-				.currentBSR(new BigDecimal(129)).currentBBPrice(new BigDecimal(169.0)).date(new Date())
-				.fbaSellerCount(123).roi(new BigDecimal(10.0)).netMargin(new BigDecimal(2.0)).build();
+        product.setNotes(notes);
 
-		ProductEntity p4 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/3433150.jpg")
-				.title("Ps5 Mlb The Show 22").buyCost(new BigDecimal(1799.0)).additionalCost(BigDecimal.ZERO)
-				.supplierLink("https://www.sears.com.mx/producto/2096137/ps5-mlb-the-show-22/").asin("B0892PYYBS")
-				.category("House").tags(Set.of(tagChristmas)).notes("Expensive product").currentBSR(new BigDecimal(1))
-				.currentBBPrice(new BigDecimal(1799.0)).date(new Date()).fbaSellerCount(28).roi(new BigDecimal(100.0))
-				.netMargin(new BigDecimal(24.0)).build();
+        productRepository.save(product);
+        log.debug("Notes were added to the product");
+    }
 
-		ProductEntity p5 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/3589578.jpg")
-				.title("Figura de Lujo Black Adam 12").buyCost(new BigDecimal(1049.0)).additionalCost(BigDecimal.ZERO)
-				.supplierLink("https://www.sears.com.mx/producto/2247115/figura-de-lujo-black-adam-12/")
-				.asin("B0832PYYBS").category("House").tags(Set.of(tagChristmas)).notes("Expensive product")
-				.currentBSR(new BigDecimal(8)).currentBBPrice(new BigDecimal(1049.0)).date(new Date())
-				.fbaSellerCount(10).roi(new BigDecimal(17.0)).netMargin(new BigDecimal(2.0)).build();
+    public void updateProduct(Integer productId, ProductEntity productRequest) {
+        log.debug("Updating product");
+        ProductEntity product = productRepository.findById(productId.longValue())
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
 
-		ProductEntity p6 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/3328428.jpg")
-				.title("Celular Motorola Edge 20 5G Xt2143-1 Color Negro R9 (Telcel)").buyCost(new BigDecimal(9999.0))
-				.additionalCost(BigDecimal.ZERO)
-				.supplierLink(
-						"https://www.sears.com.mx/producto/1141788/celular-motorola-edge-20-5g-xt2143-1-color-negro-r9-telcel/")
-				.asin("B0892PYYFS").category("Phones").tags(Set.of(tagChristmas)).notes("This has discount")
-				.currentBSR(new BigDecimal(10)).currentBBPrice(new BigDecimal(9999.0)).date(new Date())
-				.fbaSellerCount(4).roi(new BigDecimal(145.0)).netMargin(new BigDecimal(27.0)).build();
+        if (Objects.nonNull(productRequest.getSupplier())) {
+            product.setSupplier(productRequest.getSupplier());
+        }
 
-		ProductEntity p7 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/3436455.jpg")
-				.title("Playera Manga Corta Carter´s Modelo 3N125310 para      Niña").buyCost(new BigDecimal(239.0))
-				.additionalCost(BigDecimal.ZERO)
-				.supplierLink(
-						"https://www.sears.com.mx/producto/2082513/playera-manga-corta-carter-s-modelo-3n125310-para-nina/")
-				.asin("A0892PYYBS").category("Girls").tags(Set.of(tagChristmas)).notes("For beautiful girls")
-				.currentBSR(new BigDecimal(10)).currentBBPrice(new BigDecimal(149.0)).date(new Date())
-				.fbaSellerCount(60).roi(new BigDecimal(32.0)).netMargin(new BigDecimal(23.0)).build();
+        if (Objects.nonNull(productRequest.getSupplierLink())) {
+            product.setSupplierLink(productRequest.getSupplierLink());
+        }
 
-		ProductEntity p8 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/2902550.jpg")
-				.title("Reloj para Hombre Bulova Color Dorado").buyCost(new BigDecimal(8239.0))
-				.additionalCost(BigDecimal.ZERO)
-				.supplierLink("https://www.sears.com.mx/producto/164594/reloj-para-hombre-bulova-color-dorado/")
-				.asin("B1892PYYBS").category("House").tags(Set.of(tagChristmas)).notes("Expensive product")
-				.currentBSR(new BigDecimal(11)).currentBBPrice(new BigDecimal(8239.0)).date(new Date())
-				.fbaSellerCount(2).roi(new BigDecimal(10.0)).netMargin(new BigDecimal(2.0)).build();
+        if (Objects.nonNull(productRequest.getBuyCost())) {
+            final BigDecimal previousBuyCost = product.getBuyCost();
+            final BigDecimal buyCost = productRequest.getBuyCost();
+            final BigDecimal currentBBPrice = product.getCurrentBBPrice();
+            final BigDecimal feesAmount = currentBBPrice.subtract(product.getNetProfit()).subtract(previousBuyCost);
+            // Calculations to get the ROI and profit
+            BigDecimal netProfit = currentBBPrice.subtract(feesAmount).subtract(buyCost);
+            BigDecimal roi = netProfit.divide(buyCost, 2, RoundingMode.HALF_UP).multiply(new BigDecimal(100));
 
-		ProductEntity p9 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/3618938.jpg")
-				.title("Ajedrez 3D Coleccionable Star Wars Novelty").buyCost(new BigDecimal(1999.0))
-				.additionalCost(BigDecimal.ZERO)
-				.supplierLink("https://www.sears.com.mx/producto/2297176/ajedrez-3d-coleccionable-star-wars-novelty/")
-				.asin("B0882PYYBS").category("Games").tags(Set.of(tagChristmas)).notes("Perfect gift")
-				.currentBSR(new BigDecimal(90)).currentBBPrice(new BigDecimal(1999.0)).date(new Date())
-				.fbaSellerCount(10).roi(new BigDecimal(10.0)).netMargin(new BigDecimal(2.0)).build();
+            product.setRoi(roi);
+            product.setNetProfit(netProfit);
+            product.setBuyCost(buyCost);
+            log.debug("Product buy cost updated {}", product);
+        }
 
-		ProductEntity p10 = ProductEntity.builder()
-				.image("https://resources.sears.com.mx/medios-plazavip/fotos/productos_sears1/original/3564266.jpg")
-				.title("Arbol de Navidad Kensingtone Fir con 350 Luces Led 2.13 M").buyCost(new BigDecimal(10999.0))
-				.additionalCost(BigDecimal.ZERO)
-				.supplierLink(
-						"https://www.sears.com.mx/producto/2234061/arbol-de-navidad-kensingtone-fir-con-350-luces-led-2-13-m/")
-				.asin("B0892PYYBS").category("House").tags(Set.of(tagChristmas)).notes("Expensive product")
-				.currentBSR(new BigDecimal(35)).currentBBPrice(new BigDecimal(10999.0)).date(new Date())
-				.fbaSellerCount(1).roi(new BigDecimal(45.0)).netMargin(new BigDecimal(680.0)).build();
+        productRepository.save(product);
+        log.debug("Product updated");
+    }
 
-		List<ProductEntity> products = List.of(p1, p2, p3, p4, p5, p6, p7, p8, p9, p10);
-		for (ProductEntity productEntity : products) {
-			create(productEntity);
-		}
+    public void deleteProduct(Integer productId) {
+        log.debug("Deleting product");
+        ProductEntity product = productRepository.findById(productId.longValue())
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id " + productId));
 
-	}
+        productRepository.delete(product);
+        log.debug("Product deleted");
+    }
+
+
+    public void createBatch(List<ProductEntity> productsRequest, String username) throws ApiException {
+        // Asin from csv productsRequest imported
+        List<String> asins = productsRequest.stream().map(p -> p.getAsin()).collect(Collectors.toList());
+
+        User user = userRepository.findByUsername(username).orElseThrow(() -> new ResourceNotFoundException("User not found with username " + username));
+
+        // Fetch items in SPAPI Catalog items
+        final ItemSearchResults itemResponse = catalogApi.searchCatalogItems(MARKETPLACES_IDS, asins, "ASIN",
+                INCLUDE_DATA, null, null, null, null, null, null, null, null);
+
+        // Get competitive pricing to get the bb price
+        GetPricingResponse getPricingResponse = productPricingApi.getCompetitivePricing(MARKETPLACE_ID_US, "Asin",
+                asins, null, null);
+        List<Price> prices = getPricingResponse.getPayload();
+
+        // Process items
+        itemResponse.getItems().stream().forEach(item -> {
+            String asin = item.getAsin();
+            // Price item
+            Price priceItem = prices.stream().filter(p -> p.getASIN().equals(asin)).findFirst().get();
+            // Get the lowest price
+            Optional<CompetitivePriceType> pricing = priceItem.getProduct().getCompetitivePricing().getCompetitivePrices().stream().filter(cp -> cp.getCompetitivePriceId().equals("1")).findFirst();
+
+            BigDecimal bbPrice = BigDecimal.ZERO;
+            if (pricing.isPresent()) {
+                bbPrice = pricing.get().getPrice().getListingPrice().getAmount();
+            }
+            GetOffersResponse getOfferResponse = null;
+            BigDecimal feesAmount = BigDecimal.ZERO;
+            try {
+//                getOfferResponse = productPricingApi.getItemOffers(MARKETPLACE_ID_US, "Collectible", asin,
+//                        null);
+                final GetMyFeesEstimateRequest getMyFeesEstimateRequest = new GetMyFeesEstimateRequest().
+                        feesEstimateRequest(new FeesEstimateRequest()
+                                .marketplaceId(MARKETPLACE_ID_US)
+                                .identifier("ASIN")
+                                .priceToEstimateFees(new PriceToEstimateFees().listingPrice(new MoneyType()
+                                        .currencyCode("USD")
+                                        .amount(bbPrice))));
+
+                final GetMyFeesEstimateResponse myFeesEstimateForASIN = feesApi.getMyFeesEstimateForASIN(getMyFeesEstimateRequest, asin);
+                log.debug("Fees estimate {}", myFeesEstimateForASIN);
+
+                final FeesEstimateResult feesEstimateResult = myFeesEstimateForASIN.getPayload().getFeesEstimateResult();
+                log.debug("Fees estimate result {}", feesEstimateResult);
+
+                final FeesEstimate feesEstimate = feesEstimateResult.getFeesEstimate();
+                log.debug("Fees {}", feesEstimate);
+
+                feesAmount = feesEstimate.getTotalFeesEstimate().getAmount();
+            } catch (ApiException e) {
+
+                log.error("Error in SP API call", e);
+            }
+            ProductEntity request = productsRequest.stream().filter(p -> p.getAsin().equals(item.getAsin())).findFirst().get();
+            ProductEntity productRequest = productItemToProductEntity(request, item, bbPrice, feesAmount);
+            productRequest.setUserId(user.getId());
+
+            Optional<ProductEntity> productDBOpt = productRepository.findByAsinAndUserId(productRequest.getAsin(), user.getId());
+
+            if (productDBOpt.isPresent()) {
+                ProductEntity productDB = productDBOpt.get();
+
+                // Update product only if supplier link, supplier or buy cost are different
+                if (!request.getSupplier().equals(productDB.getSupplier()) && !request.getSupplierLink().equals(productDB.getSupplierLink())) {
+                    log.info("Supplier changed from {} to {}", request.getSupplier(), productRequest.getSupplier());
+                    this.create(productRequest);
+                } else {
+                    log.info("Supplier not changed");
+                }
+            } else {
+                this.create(productRequest);
+            }
+        });
+    }
+
+    //// @formatter:off
+    private ProductEntity productItemToProductEntity(final ProductEntity request, final Item item, final BigDecimal bbPrice, final BigDecimal feesAmount) {
+
+        final BigDecimal buyCost = request.getBuyCost();
+        // Calculations to get the ROI and profit
+        BigDecimal netProfit = bbPrice.subtract(feesAmount).subtract(buyCost);
+        BigDecimal roi = netProfit.divide(buyCost, 2, RoundingMode.HALF_UP).multiply(new BigDecimal(100));
+
+        final var productCondition = "new";
+//		BigDecimal buyPrice = getOfferResponse.getPayload().getSummary().getLowestPrices().stream().filter(lp->lp.getCondition().equals(productCondition)).findFirst().get().getLandedPrice().getAmount();
+
+        Random rand = new Random();
+        String supplier = SUPPLIERS.get(rand.nextInt(SUPPLIERS.size()));
+        return ProductEntity.builder()
+                .asin(item.getAsin())
+                .amazonLink(item.getImages().get(0).getImages().get(0).getLink())
+                .buyCost(buyCost)
+                .netProfit(netProfit)
+                .category(Objects.nonNull(item.getSalesRanks().isEmpty()) ? "NA" : item.getSalesRanks().get(0).getClassificationRanks().get(0).getTitle())
+                .currentBSR(new BigDecimal(item.getSalesRanks().get(0).getClassificationRanks().get(0).getRank()))
+                .currentBBPrice(bbPrice)
+                .title(item.getSummaries().get(0).getItemName())
+                .roi(roi)
+                .fbaSellerCount(item.getSalesRanks().get(0).getClassificationRanks().get(0).getRank())
+                .additionalCost(BigDecimal.ZERO)
+                .tagsId(new ArrayList<>())
+                .date(new Date())
+                .supplierLink(request.getSupplierLink())
+                .supplier(request.getSupplier())
+                .image(item.getImages().get(0).getImages().get(0).getLink())
+                .build();
+    }
+    // @formatter:on
+
 }

@@ -1,6 +1,10 @@
 package com.myasinmanager.service;
 
 import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
+import com.google.common.collect.Lists;
+import com.myasinmanager.dto.BatchSummary;
+import com.myasinmanager.exception.ConflictException;
+import com.myasinmanager.exception.SPAPIException;
 import com.myasinmanager.model.ProductEntity;
 import com.myasinmanager.model.TagEntity;
 import com.myasinmanager.repository.ProductRepository;
@@ -15,8 +19,8 @@ import com.myasinmanager.spapi.model.catalog.Item;
 import com.myasinmanager.spapi.model.catalog.ItemSearchResults;
 import com.myasinmanager.spapi.model.product.fees.*;
 import com.myasinmanager.spapi.model.product.pricing.CompetitivePriceType;
-import com.myasinmanager.spapi.model.product.pricing.GetOffersResponse;
 import com.myasinmanager.spapi.model.product.pricing.GetPricingResponse;
+import com.myasinmanager.spapi.model.product.pricing.OfferListingCountType;
 import com.myasinmanager.spapi.model.product.pricing.Price;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +33,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -65,9 +73,12 @@ public class ProductService {
 
     public Page<ProductEntity> findAll(Pageable pageable, String username, Integer[] tags) {
         Page<ProductEntity> productsPaginated = productRepository.findAll(pageable);
-        if (Objects.isNull(username) && (Objects.isNull(tags) || tags.length == 0)) {
-            return productsPaginated;
+        if (Objects.isNull(username)) {
+
+
+            throw new ConflictException("Username must be null");
         }
+
         User user = userRepository.findByUsername(username).orElseThrow(() -> new ResourceNotFoundException("User not found with username " + username));
         // Filter products by username
         List<ProductEntity> productsByUsername = productsPaginated.getContent().stream()
@@ -83,7 +94,7 @@ public class ProductService {
             return new PageImpl<ProductEntity>(productsFilteredByTags, pageable, productsFilteredByTags.size());
         }
         log.debug("Response  findAll:{}", productsPaginated.getContent());
-        return new PageImpl<ProductEntity>(productsByUsername, pageable, productsByUsername.size());
+        return productsPaginated;
     }
 
     public ProductEntity create(ProductEntity product) {
@@ -178,84 +189,207 @@ public class ProductService {
     }
 
 
-    public void createBatch(List<ProductEntity> productsRequest, String username) throws ApiException {
-        // Asin from csv productsRequest imported
-        List<String> asins = productsRequest.stream().map(p -> p.getAsin()).collect(Collectors.toList());
-
+    public void createByBatch(List<ProductEntity> productsRequest, String username) {
+        log.debug("In ProductService createByBatch");
+        // User validation
         User user = userRepository.findByUsername(username).orElseThrow(() -> new ResourceNotFoundException("User not found with username " + username));
 
+        // Slip the items in batch of 20
+
+        List<List<ProductEntity>> productsBatch = Lists.partition(productsRequest, 20);
+        log.debug("Products batch size {}", productsBatch.size());
+
+        List<BatchSummary> batchSummary = new ArrayList<>();
+        ExecutorService executorService = Executors.newFixedThreadPool(10);
+        List<Callable<Void>> tasks = new ArrayList<>();
+
+        for (List<ProductEntity> batch : productsBatch) {
+//            tasks.add(() -> {
+            try {
+                processBatch(batch, user, batchSummary);
+            } catch (SPAPIException e) {
+                log.error("SPAPI Error processing batch with exception {}", e.getMessage());
+            } catch (Exception e) {
+                log.error("Unexpected Error processing batch {}", e.getMessage());
+            }
+//                return null;
+//            });
+        }
+//        try {
+//            executorService.invokeAll(tasks);
+//        } catch (InterruptedException e) {
+//            log.error("Error processing in parallel", e);
+//        }
+        log.debug("---------------------------------------------------Report------------------------------------------------------");
+        log.debug("Products by batch created, summary");
+        log.debug("Total input items {}", productsRequest.size());
+        log.debug("Items created successfully {}", batchSummary.stream().map(BatchSummary::getSuccess).reduce(0, Integer::sum));
+        log.debug("Items failed {}", batchSummary.stream().map(batch -> batch.getFailedItems().size()).reduce(0, Integer::sum));
+        log.debug("Items not found {}", batchSummary.stream().map(batch -> batch.getItemsNotFound().size()).reduce(0, Integer::sum));
+        log.debug("---------------------------------------------------Errors------------------------------------------------------");
+        batchSummary.stream().flatMap(batch -> batch.getFailedItems().stream()).forEach(item -> log.debug("Item failed [asin={}, message={}]", item.getAsin(), item.getMessage()));
+        log.debug("---------------------------------------------------Report------------------------------------------------------");
+    }
+
+
+    private void processBatch(List<ProductEntity> productsRequest, User user, List<BatchSummary> batchSummary) throws SPAPIException {
+
+        BatchSummary batch = new BatchSummary();
+
+        // ASIN from csv productsRequest imported
+        List<String> asins = productsRequest.stream().map(p -> p.getAsin()).collect(Collectors.toList());
+
         // Fetch items in SPAPI Catalog items
-        final ItemSearchResults itemResponse = catalogApi.searchCatalogItems(MARKETPLACES_IDS, asins, "ASIN",
-                INCLUDE_DATA, null, null, null, null, null, null, null, null);
+        ItemSearchResults itemResponse = getItemSearchResults(productsRequest, batchSummary, batch, asins);
 
         // Get competitive pricing to get the bb price
-        GetPricingResponse getPricingResponse = productPricingApi.getCompetitivePricing(MARKETPLACE_ID_US, "Asin",
-                asins, null, null);
+        GetPricingResponse getPricingResponse = getGetPricingResponse(productsRequest, batchSummary, batch, asins);
+
+        List<BatchSummary.FailedItems> failedItems = new ArrayList<>();
+        AtomicInteger success = new AtomicInteger(0);
+
         List<Price> prices = getPricingResponse.getPayload();
-
         // Process items
-        itemResponse.getItems().stream().forEach(item -> {
+        for (Item item : itemResponse.getItems()) {
             String asin = item.getAsin();
-            // Price item
-            Price priceItem = prices.stream().filter(p -> p.getASIN().equals(asin)).findFirst().get();
-            // Get the lowest price
-            Optional<CompetitivePriceType> pricing = priceItem.getProduct().getCompetitivePricing().getCompetitivePrices().stream().filter(cp -> cp.getCompetitivePriceId().equals("1")).findFirst();
-
-            BigDecimal bbPrice = BigDecimal.ZERO;
-            if (pricing.isPresent()) {
-                bbPrice = pricing.get().getPrice().getListingPrice().getAmount();
-            }
-            GetOffersResponse getOfferResponse = null;
-            BigDecimal feesAmount = BigDecimal.ZERO;
             try {
-//                getOfferResponse = productPricingApi.getItemOffers(MARKETPLACE_ID_US, "Collectible", asin,
-//                        null);
-                final GetMyFeesEstimateRequest getMyFeesEstimateRequest = new GetMyFeesEstimateRequest().
-                        feesEstimateRequest(new FeesEstimateRequest()
-                                .marketplaceId(MARKETPLACE_ID_US)
-                                .identifier("ASIN")
-                                .priceToEstimateFees(new PriceToEstimateFees().listingPrice(new MoneyType()
-                                        .currencyCode("USD")
-                                        .amount(bbPrice))));
-
-                final GetMyFeesEstimateResponse myFeesEstimateForASIN = feesApi.getMyFeesEstimateForASIN(getMyFeesEstimateRequest, asin);
-                log.debug("Fees estimate {}", myFeesEstimateForASIN);
-
-                final FeesEstimateResult feesEstimateResult = myFeesEstimateForASIN.getPayload().getFeesEstimateResult();
-                log.debug("Fees estimate result {}", feesEstimateResult);
-
-                final FeesEstimate feesEstimate = feesEstimateResult.getFeesEstimate();
-                log.debug("Fees {}", feesEstimate);
-
-                feesAmount = feesEstimate.getTotalFeesEstimate().getAmount();
-            } catch (ApiException e) {
-
-                log.error("Error in SP API call", e);
-            }
-            ProductEntity request = productsRequest.stream().filter(p -> p.getAsin().equals(item.getAsin())).findFirst().get();
-            ProductEntity productRequest = productItemToProductEntity(request, item, bbPrice, feesAmount);
-            productRequest.setUserId(user.getId());
-
-            Optional<ProductEntity> productDBOpt = productRepository.findByAsinAndUserId(productRequest.getAsin(), user.getId());
-
-            if (productDBOpt.isPresent()) {
-                ProductEntity productDB = productDBOpt.get();
-
-                // Update product only if supplier link, supplier or buy cost are different
-                if (!request.getSupplier().equals(productDB.getSupplier()) && !request.getSupplierLink().equals(productDB.getSupplierLink())) {
-                    log.info("Supplier changed from {} to {}", request.getSupplier(), productRequest.getSupplier());
-                    this.create(productRequest);
-                } else {
-                    log.info("Supplier not changed");
+                // Price item
+                Optional<Price> priceItemOpt = prices.stream().filter(p -> p.getASIN().equals(asin)).findFirst();
+                if (priceItemOpt.isEmpty()) {
+                    log.error("Price item not found for asin [{}]", asin);
+                    failedItems.add(BatchSummary.FailedItems
+                            .builder()
+                            .asin(asin)
+                            .message("Price not found")
+                            .build());
+                    continue;
                 }
-            } else {
-                this.create(productRequest);
+                Price priceItem = priceItemOpt.get();
+                // Get the lowest price
+                Optional<CompetitivePriceType> pricing = priceItem.getProduct().getCompetitivePricing().getCompetitivePrices().stream().filter(cp -> Objects.nonNull(cp.getCompetitivePriceId())).findFirst();
+                // Get the seller count
+                Integer sellerCount = 0;
+                Optional<OfferListingCountType> sellerCountOptNew = priceItem.getProduct().getCompetitivePricing().getNumberOfOfferListings().stream().filter(l -> l.getCondition().equals("New")).findFirst();
+
+                if (sellerCountOptNew.isPresent()) {
+                    sellerCount = sellerCountOptNew.get().getCount();
+                } else {
+                    Optional<OfferListingCountType> sellerCountOptUsed = priceItem.getProduct().getCompetitivePricing().getNumberOfOfferListings().stream().filter(l -> l.getCondition().equals("Used")).findFirst();
+                    if (sellerCountOptUsed.isPresent()) {
+                        sellerCount = sellerCountOptUsed.get().getCount();
+                    }
+                }
+
+                BigDecimal bbPrice = BigDecimal.ZERO;
+                if (pricing.isPresent()) {
+                    bbPrice = pricing.get().getPrice().getListingPrice().getAmount();
+                }
+                BigDecimal feesAmount = getFeesAmount(asin, bbPrice);
+
+                ProductEntity request = productsRequest.stream().filter(p -> p.getAsin().equals(item.getAsin())).findFirst().get();
+                ProductEntity productRequest = productItemToProductEntity(request, item, bbPrice, feesAmount, sellerCount);
+                productRequest.setUserId(user.getId());
+
+                Optional<ProductEntity> productDBOpt = productRepository.findByAsinAndUserId(productRequest.getAsin(), user.getId());
+                if (productDBOpt.isPresent()) {
+                    ProductEntity productDB = productDBOpt.get();
+
+                    // Update product only if supplier link, supplier or buy cost are different
+                    if (!request.getSupplier().equals(productDB.getSupplier()) && !request.getSupplierLink().equals(productDB.getSupplierLink())) {
+                        log.info("Supplier changed from {} to {}", request.getSupplier(), productRequest.getSupplier());
+                        success.getAndIncrement();
+                        this.create(productRequest);
+                    } else {
+                        log.info("Supplier not changed");
+                    }
+                } else {
+                    success.getAndIncrement();
+                    this.create(productRequest);
+                }
+            } catch (Exception e) {
+                var message = String.format("Unexpected error processing item [%s]", e.getMessage());
+                BatchSummary.FailedItems failedItem = BatchSummary.FailedItems
+                        .builder()
+                        .asin(asin)
+                        .message(message)
+                        .build();
+                failedItems.add(failedItem);
+                log.error(message, e);
             }
-        });
+        }
+        List<String> asinInCatalog = itemResponse.getItems().stream().map(i -> i.getAsin()).collect(Collectors.toList());
+
+        batch.setTotal(productsRequest.size());
+        batch.setItemsNotFound(productsRequest.stream().map(i -> i.getAsin()).filter(asin -> !asinInCatalog.contains(asin)).collect(Collectors.toList()));
+        batch.setSuccess(success.get());
+        batch.setFailedItems(failedItems);
+        batch.setFailed(failedItems.size());
+        batchSummary.add(batch);
+    }
+
+    private BigDecimal getFeesAmount(String asin, BigDecimal bbPrice) throws ApiException {
+        BigDecimal feesAmount = BigDecimal.ZERO;
+        try {
+            final GetMyFeesEstimateRequest getMyFeesEstimateRequest = new GetMyFeesEstimateRequest().
+                    feesEstimateRequest(new FeesEstimateRequest()
+                            .marketplaceId(MARKETPLACE_ID_US)
+                            .identifier("ASIN")
+                            .priceToEstimateFees(new PriceToEstimateFees().listingPrice(new MoneyType()
+                                    .currencyCode("USD")
+                                    .amount(bbPrice))));
+
+            final GetMyFeesEstimateResponse myFeesEstimateForASIN = feesApi.getMyFeesEstimateForASIN(getMyFeesEstimateRequest, asin);
+            log.debug("Fees estimate {}", myFeesEstimateForASIN);
+
+            final FeesEstimateResult feesEstimateResult = myFeesEstimateForASIN.getPayload().getFeesEstimateResult();
+            log.debug("Fees estimate result {}", feesEstimateResult);
+
+            final FeesEstimate feesEstimate = feesEstimateResult.getFeesEstimate();
+            log.debug("Fees {}", feesEstimate);
+
+            feesAmount = feesEstimate.getTotalFeesEstimate().getAmount();
+        } catch (ApiException e) {
+            var message = String.format("Error fetching in [FeesApi] for item %s from SPAPI with error {}", asin, e.getMessage()
+            );
+            log.error(message);
+        }
+        return feesAmount;
+    }
+
+    private ItemSearchResults getItemSearchResults(List<ProductEntity> productsRequest, List<BatchSummary> batchSummary, BatchSummary batch, List<String> asins) {
+        ItemSearchResults itemResponse;
+        try {
+            itemResponse = catalogApi.searchCatalogItems(MARKETPLACES_IDS, asins, "ASIN",
+                    INCLUDE_DATA, null, null, null, null, null, null, null, null);
+        } catch (ApiException e) {
+            var message = "Error fetching in [CatalogApi] items from SPAPI";
+            batch.setFailed(productsRequest.size());
+            batch.setSuccess(0);
+            batch.setFailedMessage(message);
+            batchSummary.add(batch);
+            throw new SPAPIException(message, e);
+        }
+        return itemResponse;
+    }
+
+    private GetPricingResponse getGetPricingResponse(List<ProductEntity> productsRequest, List<BatchSummary> batchSummary, BatchSummary batch, List<String> asins) {
+        GetPricingResponse getPricingResponse;
+        try {
+            getPricingResponse = productPricingApi.getCompetitivePricing(MARKETPLACE_ID_US, "Asin",
+                    asins, null, null);
+        } catch (ApiException e) {
+            var message = "Error fetching in [ProductPricingApi] items from SPAPI";
+            batch.setFailed(productsRequest.size());
+            batch.setSuccess(0);
+            batch.setFailedMessage(message);
+            batchSummary.add(batch);
+            throw new SPAPIException(message, e);
+        }
+        return getPricingResponse;
     }
 
     //// @formatter:off
-    private ProductEntity productItemToProductEntity(final ProductEntity request, final Item item, final BigDecimal bbPrice, final BigDecimal feesAmount) {
+    private ProductEntity productItemToProductEntity(final ProductEntity request, final Item item, final BigDecimal bbPrice, final BigDecimal feesAmount, final Integer sellerCount) {
 
         final BigDecimal buyCost = request.getBuyCost();
         // Calculations to get the ROI and profit
@@ -263,29 +397,41 @@ public class ProductService {
         BigDecimal roi = netProfit.divide(buyCost, 2, RoundingMode.HALF_UP).multiply(new BigDecimal(100));
 
         final var productCondition = "new";
-//		BigDecimal buyPrice = getOfferResponse.getPayload().getSummary().getLowestPrices().stream().filter(lp->lp.getCondition().equals(productCondition)).findFirst().get().getLandedPrice().getAmount();
-
+        final var amazonLink = String.format("https://www.amazon.com/dp/%s", item.getAsin());
+        BigDecimal bsr = BigDecimal.ZERO;
+        try {
+            bsr = new BigDecimal(item.getSalesRanks().get(0).getDisplayGroupRanks().get(0).getRank());
+        } catch (Exception e) {
+            log.error("Error getting BSR for item {}", item.getAsin());
+        }
+        String amazonImage = "";
+        try {
+            amazonImage = item.getImages().get(0).getImages().get(0).getLink();
+        } catch (Exception e) {
+            log.error("Error getting image for item {}", item.getAsin());
+        }
         Random rand = new Random();
         String supplier = SUPPLIERS.get(rand.nextInt(SUPPLIERS.size()));
         return ProductEntity.builder()
                 .asin(item.getAsin())
-                .amazonLink(item.getImages().get(0).getImages().get(0).getLink())
+                .amazonLink(amazonLink)
                 .buyCost(buyCost)
                 .netProfit(netProfit)
-                .category(Objects.nonNull(item.getSalesRanks().isEmpty()) ? "NA" : item.getSalesRanks().get(0).getClassificationRanks().get(0).getTitle())
-                .currentBSR(new BigDecimal(item.getSalesRanks().get(0).getClassificationRanks().get(0).getRank()))
+                .category("NA")
+                .currentBSR(bsr)
                 .currentBBPrice(bbPrice)
                 .title(item.getSummaries().get(0).getItemName())
                 .roi(roi)
-                .fbaSellerCount(item.getSalesRanks().get(0).getClassificationRanks().get(0).getRank())
+                .fbaSellerCount(sellerCount)
                 .additionalCost(BigDecimal.ZERO)
                 .tagsId(new ArrayList<>())
                 .date(new Date())
                 .supplierLink(request.getSupplierLink())
                 .supplier(request.getSupplier())
-                .image(item.getImages().get(0).getImages().get(0).getLink())
+                .image(amazonImage)
                 .build();
     }
     // @formatter:on
+
 
 }

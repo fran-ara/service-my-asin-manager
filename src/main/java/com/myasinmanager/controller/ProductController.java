@@ -3,7 +3,6 @@ package com.myasinmanager.controller;
 import com.myasinmanager.model.ProductEntity;
 import com.myasinmanager.service.ProductService;
 import com.myasinmanager.service.TagService;
-import com.myasinmanager.spapi.client.ApiException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -59,14 +58,9 @@ public class ProductController {
 
     @PostMapping("/create-product-batch")
     public ResponseEntity<Void> createBatch(@RequestBody List<ProductEntity> productsRequest, @RequestParam String username) {
-        log.debug("For user {}, creating products by batch {}", username, productsRequest);
-        try {
-            productService.createBatch(productsRequest, username);
-        } catch (ApiException e) {
-            log.error("Error creating products by batch", e);
-            return ResponseEntity.badRequest().build();
-        }
-        return ResponseEntity.ok().build();
+        log.debug("For user {}, creating products by batch [items = {}]", username, productsRequest.size());
+        productService.createByBatch(productsRequest, username);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/add-tags")
@@ -78,7 +72,7 @@ public class ProductController {
 
     @PostMapping("/{id}/assing-tag")
     public ResponseEntity<Void> createTag(@PathVariable Integer id, @RequestParam("username") String username, @RequestParam("name") String tagName) {
-        log.debug("For user {} Creating new tag {} to the product {}",username, tagName, id);
+        log.debug("For user {} Creating new tag {} to the product {}", username, tagName, id);
         productService.addNewTagToProduct(id, username, tagName);
         return ResponseEntity.noContent().build();
     }

@@ -14,7 +14,7 @@ import org.springframework.context.annotation.Configuration;
 @Slf4j
 public class SPAPIConfiguration {
 
-    private final String REFRESH_TOKEN = "Atzr|IwEBIEWycS6xnoZje4BouH_gRbYwnKicW0p2dZc-Hg1Y7qB5fKyOQHTPnAn0_BByUDH1eiCNvydVi2m3vHxgS4Vt_AhoBSgAmWHVnRS0v2vYgwmuzBNkQXUZzUs2zmEnNOftCec9hSNDwzPDfXvKdQJlVSKSx0B_S8wzSk4l-uMZW1oRvXHUheJfl8aBmt4l8qb6Ld9qD9vhmGaZ7g_3nNJvddyPPTaWvYUobqF1hze6v94iTUe1KBBmdIlmX5myK6I9nA4iqbaV9KLQD6DtvdtIK1vuaE5-h0PLtu3BB8OnNVdnexOpJUH1QeYXMVkweMZCwPQ";
+    private final String REFRESH_TOKEN = "Atzr|IwEBINgj7eBywqiZqwr7UZK8ugyURWCBL45_G5JGRnDzzEtuq8GjEoGYRMMBBkI4PtGVO5R4_Q7GPmv3rDRSGCU0sE231FfVgJ_isolFzchkRf1wIEwHm95Xb3SH5oPLzMRWuEVDF5r5rxeQ7d5UeAIuTC78HckzDXvauTQjHOLLSPEAby28Tj3QOwPIPPPYLy6Fw497wxg-uhH4AAHb3ktBlcGMjrpVnIbP9Q50sFxCnyizo73p8CeCoC824xACC5Ez0RZgJFDxUVI0LBJYVI72YLTGfBgazYGASrvmuWqeKaUSOLjLW9OuoX4EP-2q-gxLzwY";
     private final String END_POINT_AUTH = "https://api.amazon.com/auth/o2/token";
     private final String END_POINT_SELLING_PARTNER = "https://sellingpartnerapi-na.amazon.com";
     @Value("${amazon.aws.accesskey}")
@@ -33,8 +33,8 @@ public class SPAPIConfiguration {
     public AWSAuthenticationCredentials awsAuthenticationCredentials() {
         log.debug("AWS Credentials acccesKey {} secret {}", amazonAWSAccessKey, amazonAWSSecretKey);
         return AWSAuthenticationCredentials.builder()
-                .accessKeyId("AKIA34HUBZZLKJC6O3P6")
-                .secretKey("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")
+                .accessKeyId("AKIATDXR5OPIN4XP7O7W")
+                .secretKey("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")
                 .region("us-east-1").build();
     }
 
@@ -43,9 +43,9 @@ public class SPAPIConfiguration {
         log.debug("SPAPI credentials cliendId [{}] secret [{}] endpoint [{}]", clientId, clientSecret, END_POINT_AUTH);
         return LWAAuthorizationCredentials.builder()
                 .clientId("amzn1.application-oa2-client.9c7d7d3a2c204a4d9f9129585160c7f6")
-                .clientSecret("11e90520bbd03ef438e688adb5d3e502724f6601f07c8cfb25ab8a06bfdc0e00")
+                .clientSecret("f36b5b3d2bc1dbe423387c8e10022a7be65df2ccf33f5e9b8aff7e8cf1d3e5e1")
                 .refreshToken(
-                        "Atzr|IwEBIEWycS6xnoZje4BouH_gRbYwnKicW0p2dZc-Hg1Y7qB5fKyOQHTPnAn0_BByUDH1eiCNvydVi2m3vHxgS4Vt_AhoBSgAmWHVnRS0v2vYgwmuzBNkQXUZzUs2zmEnNOftCec9hSNDwzPDfXvKdQJlVSKSx0B_S8wzSk4l-uMZW1oRvXHUheJfl8aBmt4l8qb6Ld9qD9vhmGaZ7g_3nNJvddyPPTaWvYUobqF1hze6v94iTUe1KBBmdIlmX5myK6I9nA4iqbaV9KLQD6DtvdtIK1vuaE5-h0PLtu3BB8OnNVdnexOpJUH1QeYXMVkweMZCwPQ")
+                        "Atzr|IwEBIE1f9PaJ_TZLVkaeV9TpyyQImemb27Tn_Rgs_WLnwh-51C-NeuX-hqIpuw1pO21L9t-HtEXiILIw9911M8RflkUuhrCEvbhKAzabRWRMbyHlqspfOt4Kw5vpkSggOTd7PB6C4X7WkWkUVHwH1TBIcLTbitwFY2mxRUfW4mtOGFGe9C16AR1ErP4r_j3HISPXIyJkGR0RMNwZA4b4jAyuwdNGjXTDSGx17lykbEZSbo2M_JGdAomQVURXmYyOJbcM3nsFO3AKuQdi6f3Yh4nYYIP53fp72M5hkaYN4DjjwmPLEsZBB78y8j7EOGwblsORDic")
                 .endpoint("https://api.amazon.com/auth/o2/token").build();
     }
 

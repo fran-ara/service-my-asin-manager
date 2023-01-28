@@ -72,31 +72,23 @@ public class ProductService {
     private UserRepository userRepository;
 
     public Page<ProductEntity> findAll(Pageable pageable, String username, Integer[] tags) {
-        Page<ProductEntity> productsPaginated = productRepository.findAll(pageable);
         if (Objects.isNull(username)) {
-
-
             throw new ConflictException("Username must be null");
         }
-
         User user = userRepository.findByUsername(username).orElseThrow(() -> new ResourceNotFoundException("User not found with username " + username));
-        // Filter products by username
-        List<ProductEntity> productsByUsername = productsPaginated.getContent().stream()
-                .filter(product -> (Objects.nonNull(product.getUserId())) && product.getUserId().equals(user.getId()))
-                .collect(Collectors.toList());
-
+        log.debug("User:{}", user.getId());
+        Page<ProductEntity> productsPaginatedByUserId = productRepository.findByUserId(user.getId(), pageable);
 
         if (Objects.nonNull(tags) && tags.length > 0) {
             List<Integer> tagsIds = Stream.of(tags).mapToInt(i -> i).boxed().collect(Collectors.toList());
-            List<ProductEntity> productsFilteredByTags = productsByUsername.stream()
+            List<ProductEntity> productsFilteredByTags = productsPaginatedByUserId.getContent().stream()
                     .filter(p -> p.getTagsId().containsAll(tagsIds)).collect(Collectors.toList());
             log.debug("Response  findAll:{}", productsFilteredByTags);
             return new PageImpl<ProductEntity>(productsFilteredByTags, pageable, productsFilteredByTags.size());
         }
-        log.debug("Response  findAll:{}", productsPaginated.getContent());
-        return productsPaginated;
+        log.debug("Response  findAll:{}", productsPaginatedByUserId.getContent());
+        return productsPaginatedByUserId;
     }
-
     public ProductEntity create(ProductEntity product) {
         log.debug("Inserting product :{}", product);
         ProductEntity productSaved = productRepository.save(product);
@@ -196,7 +188,7 @@ public class ProductService {
 
         // Slip the items in batch of 20
 
-        List<List<ProductEntity>> productsBatch = Lists.partition(productsRequest, 20);
+        List<List<ProductEntity>> productsBatch = Lists.partition(productsRequest, 10);
         log.debug("Products batch size {}", productsBatch.size());
 
         List<BatchSummary> batchSummary = new ArrayList<>();
@@ -206,11 +198,14 @@ public class ProductService {
         for (List<ProductEntity> batch : productsBatch) {
 //            tasks.add(() -> {
             try {
+
                 processBatch(batch, user, batchSummary);
+                log.debug("Waiting for next batch 3 seconds");
+                Thread.sleep(2000);
             } catch (SPAPIException e) {
-                log.error("SPAPI Error processing batch with exception {}", e.getMessage());
+                log.error("SPAPI Error processing batch with exception {}", e.getMessage(), e);
             } catch (Exception e) {
-                log.error("Unexpected Error processing batch {}", e.getMessage());
+                log.error("Unexpected Error processing batch {}", e.getMessage(), e);
             }
 //                return null;
 //            });
@@ -432,6 +427,4 @@ public class ProductService {
                 .build();
     }
     // @formatter:on
-
-
 }

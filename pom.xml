@@ -90,11 +90,6 @@
 			<artifactId>threetenbp</artifactId>
 			<version>${threetenbp-version}</version>
 		</dependency>
-		<dependency>
-			<groupId>com.amazon.sellingpartnerapi</groupId>
-			<artifactId>sellingpartnerapi-aa-java</artifactId>
-			<version>1.0</version>
-		</dependency>
 		<!-- https://mvnrepository.com/artifact/javax.annotation/javax.annotation-api -->
 		<dependency>
 			<groupId>javax.annotation</groupId>

@@ -1,0 +1,30 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Container Diagram for MyAsinManager Backend Service
+
+!define REL_STYLE down-allow
+
+Person(frontendUser, "MyAsinManager Frontend User", "Interacts with the MyAsinManager platform")
+Person(administrator, "Administrator", "Manages and configures the MyAsinManager Backend Service")
+
+System_Boundary(myAsinManagerBoundary, "MyAsinManager Backend Service") {
+    Container(apiController, "API Controller", "Handles client requests and manages Server-Sent Events")
+    Container(tagManager, "Tag Manager", "Performs CRUD operations for Tags")
+    Container(productManager, "Product Manager", "Performs CRUD operations for Products and fetches data from Amazon SP API")
+    Container(database, "Database", "Stores product and tag data")
+    Container(serverSentEvents, "Server-Sent Events", "Real-time communication with MyAsinManager Frontend")
+}
+
+Rel(frontendUser, apiController, "Sends requests and receives real-time updates (Server-Sent Events)")
+Rel(administrator, apiController, "Manages and configures the service")
+
+System_Ext(amazonSPAPI, "Amazon SP API", "Provides product information")
+Rel(productManager, amazonSPAPI, "Fetches product information")
+Rel(apiController, tagManager, "Performs CRUD operations on tags")
+Rel(apiController, productManager, "Performs CRUD operations on products")
+Rel(tagManager, database, "Stores and retrieves tag data")
+Rel(productManager, database, "Stores and retrieves product data")
+Rel(serverSentEvents, frontendUser, "Pushes real-time updates")
+
+@enduml

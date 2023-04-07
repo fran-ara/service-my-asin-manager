@@ -1,5 +1,6 @@
 package com.myasinmanager.controller;
 
+import com.myasinmanager.dto.BatchSummaryInfo;
 import com.myasinmanager.model.ProductEntity;
 import com.myasinmanager.service.ProductService;
 import com.myasinmanager.service.TagService;
@@ -7,9 +8,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.ByteArrayOutputStream;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.util.Arrays;
 import java.util.List;
@@ -57,10 +63,27 @@ public class ProductController {
     }
 
     @PostMapping("/create-product-batch")
-    public ResponseEntity<Void> createBatch(@RequestBody List<ProductEntity> productsRequest, @RequestParam String username) {
+    public ResponseEntity<byte[]> createBatch(@RequestBody List<ProductEntity> productsRequest, @RequestParam String username) {
         log.debug("For user {}, creating products by batch [items = {}]", username, productsRequest.size());
-        productService.createByBatch(productsRequest, username);
-        return ResponseEntity.noContent().build();
+        BatchSummaryInfo batchSummaryInfo = productService.createByBatch(productsRequest, username);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        OutputStreamWriter writer = new OutputStreamWriter(baos, StandardCharsets.UTF_8);
+        try {
+            writer.append("TOTAL,SUCESS,FAILED,NOT_FOUND");
+            writer.append("\n");
+            writer.append("" + String.valueOf(batchSummaryInfo.getTotal()) + "," + String.valueOf(batchSummaryInfo.getSuccess()) + "," + String.valueOf(batchSummaryInfo.getFailed()) + "," + String.valueOf(batchSummaryInfo.getNotFound()));
+            writer.flush();
+            writer.close();
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+            return ResponseEntity.internalServerError().build();
+        }
+        byte[] csv = baos.toByteArray();
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Content-Type", "text/csv");
+        headers.add("Content-Disposition", "attachment; filename=data.csv");
+        return new ResponseEntity<>(csv, headers, HttpStatus.OK);
     }
 
     @PostMapping("/{id}/add-tags")

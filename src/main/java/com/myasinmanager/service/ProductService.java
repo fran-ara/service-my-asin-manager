@@ -3,6 +3,7 @@ package com.myasinmanager.service;
 import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
 import com.google.common.collect.Lists;
 import com.myasinmanager.dto.BatchSummary;
+import com.myasinmanager.dto.BatchSummaryInfo;
 import com.myasinmanager.exception.ConflictException;
 import com.myasinmanager.exception.SPAPIException;
 import com.myasinmanager.model.ProductEntity;
@@ -89,6 +90,7 @@ public class ProductService {
         log.debug("Response  findAll:{}", productsPaginatedByUserId.getContent());
         return productsPaginatedByUserId;
     }
+
     public ProductEntity create(ProductEntity product) {
         log.debug("Inserting product :{}", product);
         ProductEntity productSaved = productRepository.save(product);
@@ -181,13 +183,12 @@ public class ProductService {
     }
 
 
-    public void createByBatch(List<ProductEntity> productsRequest, String username) {
+    public BatchSummaryInfo createByBatch(List<ProductEntity> productsRequest, String username) {
         log.debug("In ProductService createByBatch");
         // User validation
         User user = userRepository.findByUsername(username).orElseThrow(() -> new ResourceNotFoundException("User not found with username " + username));
 
         // Slip the items in batch of 20
-
         List<List<ProductEntity>> productsBatch = Lists.partition(productsRequest, 10);
         log.debug("Products batch size {}", productsBatch.size());
 
@@ -198,10 +199,9 @@ public class ProductService {
         for (List<ProductEntity> batch : productsBatch) {
 //            tasks.add(() -> {
             try {
-
                 processBatch(batch, user, batchSummary);
-                log.debug("Waiting for next batch 3 seconds");
-                Thread.sleep(2000);
+                log.debug("Waiting for next batch 1 seconds");
+                Thread.sleep(1000);
             } catch (SPAPIException e) {
                 log.error("SPAPI Error processing batch with exception {}", e.getMessage(), e);
             } catch (Exception e) {
@@ -215,15 +215,26 @@ public class ProductService {
 //        } catch (InterruptedException e) {
 //            log.error("Error processing in parallel", e);
 //        }
+        int success = batchSummary.stream().map(BatchSummary::getSuccess).reduce(0, Integer::sum);
+        int failed = batchSummary.stream().map(batch -> batch.getFailedItems().size()).reduce(0, Integer::sum);
+        int notFound = batchSummary.stream().map(batch -> batch.getItemsNotFound().size()).reduce(0, Integer::sum);
+
+        BatchSummaryInfo batchSummaryInfo = BatchSummaryInfo.builder()
+                .total(productsRequest.size())
+                .success(success)
+                .failed(failed)
+                .notFound(notFound)
+                .build();
         log.debug("---------------------------------------------------Report------------------------------------------------------");
         log.debug("Products by batch created, summary");
         log.debug("Total input items {}", productsRequest.size());
-        log.debug("Items created successfully {}", batchSummary.stream().map(BatchSummary::getSuccess).reduce(0, Integer::sum));
-        log.debug("Items failed {}", batchSummary.stream().map(batch -> batch.getFailedItems().size()).reduce(0, Integer::sum));
-        log.debug("Items not found {}", batchSummary.stream().map(batch -> batch.getItemsNotFound().size()).reduce(0, Integer::sum));
+        log.debug("Items created successfully {}", success);
+        log.debug("Items failed {}", failed);
+        log.debug("Items not found {}", notFound);
         log.debug("---------------------------------------------------Errors------------------------------------------------------");
         batchSummary.stream().flatMap(batch -> batch.getFailedItems().stream()).forEach(item -> log.debug("Item failed [asin={}, message={}]", item.getAsin(), item.getMessage()));
         log.debug("---------------------------------------------------Report------------------------------------------------------");
+    return batchSummaryInfo;
     }
 
 
